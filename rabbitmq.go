@@ -69,7 +69,7 @@ func observeMQConnection(config MQConfig) {
 		CloseActiveConnections()
 		err := ConnectToMQ(config)
 		if err != nil {
-			log.Println("Unable to reconnect")
+			color.Red("Unable to reconnect")
 			return
 		}
 	}()
