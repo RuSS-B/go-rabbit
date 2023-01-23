@@ -1,6 +1,7 @@
 package go_rabbit
 
 import (
+	"errors"
 	"fmt"
 	"github.com/fatih/color"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -11,6 +12,12 @@ import (
 
 var mqConn *amqp.Connection
 var mqChan *amqp.Channel
+
+var (
+	queueNameMissingErr    = errors.New("the queueName name should not be empty")
+	topicMissingErr        = errors.New("there should be at least one topic provided")
+	exchangeNameMissingErr = errors.New("the exchange name should not be empty")
+)
 
 type MQConfig struct {
 	ConnectionName string
@@ -97,13 +104,8 @@ func handle(messages <-chan amqp.Delivery, handler MessageHandler) {
 	}
 }
 
-func declareQueue(queueName string) amqp.Queue {
-	q, err := mqChan.QueueDeclare(queueName, true, false, false, false, nil)
-	if err != nil {
-		log.Fatalln("Unable to declare a queue", err)
-	}
-
-	return q
+func declareQueue(queueName string) (amqp.Queue, error) {
+	return mqChan.QueueDeclare(queueName, true, false, false, false, nil)
 }
 
 func consume(q amqp.Queue) (<-chan amqp.Delivery, error) {
@@ -124,8 +126,45 @@ func consume(q amqp.Queue) (<-chan amqp.Delivery, error) {
 	return messages, err
 }
 
-func ListenQueue(queueName string, handler MessageHandler) error {
-	q := declareQueue(queueName)
+type TopicExchange struct {
+	name      string
+	queueName string
+	topics    []string
+}
+
+func (ex *TopicExchange) declareExchange() error {
+	if ex.name == "" {
+		return exchangeNameMissingErr
+	}
+
+	return mqChan.ExchangeDeclare(ex.name, "topic", true, false, false, false, nil)
+}
+
+func (ex *TopicExchange) Listen(handler MessageHandler) error {
+	err := ex.declareExchange()
+	if err != nil {
+		return err
+	}
+
+	if ex.queueName != "" {
+		return queueNameMissingErr
+	}
+
+	q, err := declareQueue(ex.queueName)
+	if err != nil {
+		return err
+	}
+
+	if len(ex.topics) == 0 {
+		return topicMissingErr
+	}
+
+	for _, s := range ex.topics {
+		err = mqChan.QueueBind(q.Name, s, ex.name, false, nil)
+		if err != nil {
+			return err
+		}
+	}
 
 	messages, err := consume(q)
 	if err != nil {
@@ -138,22 +177,23 @@ func ListenQueue(queueName string, handler MessageHandler) error {
 	return nil
 }
 
-func ListenExchange(excName string, queueName string, topics []string, handler MessageHandler) error {
-	q := declareQueue(queueName)
+type Queue struct {
+	name string
+}
 
-	for _, s := range topics {
-		err := mqChan.QueueBind(q.Name, s, excName, false, nil)
-		if err != nil {
-			return err
-		}
+func (queue *Queue) Listen(handler MessageHandler) error {
+	if queue.name == "" {
+		return queueNameMissingErr
 	}
+
+	q, err := declareQueue(queue.name)
 
 	messages, err := consume(q)
 	if err != nil {
 		return err
 	}
 
-	color.Green("Waiting for messages in [Exchange, Queue] [%s, %s]\n", excName, q.Name)
+	color.Green("Waiting for messages in [Queue] [%s]\n", q.Name)
 	handle(messages, handler)
 
 	return nil
