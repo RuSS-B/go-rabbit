@@ -2,7 +2,6 @@ package go_rabbit
 
 import (
 	"errors"
-	"fmt"
 	"github.com/fatih/color"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
@@ -47,7 +46,6 @@ func ConnectToMQ(config MQConfig) error {
 		}
 
 		if connAttempts >= int(config.MaxAttempts) {
-			fmt.Println(err)
 			return err
 		}
 
@@ -83,15 +81,15 @@ func observeMQConnection(config MQConfig) {
 }
 
 func CloseActiveConnections() {
-	if !mqChan.IsClosed() {
+	if mqChan != nil && !mqChan.IsClosed() {
 		if err := mqChan.Close(); err != nil {
-			log.Println(err)
+			log.Println("Unable to close channel", err)
 		}
 	}
 
 	if mqConn != nil && !mqConn.IsClosed() {
 		if err := mqConn.Close(); err != nil {
-			log.Println(err)
+			log.Println("Unable to close connection", err)
 		}
 	}
 }
