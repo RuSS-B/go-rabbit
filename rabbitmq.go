@@ -127,17 +127,17 @@ func consume(q amqp.Queue) (<-chan amqp.Delivery, error) {
 }
 
 type TopicExchange struct {
-	name      string
-	queueName string
-	topics    []string
+	Name      string
+	QueueName string
+	Topics    []string
 }
 
 func (ex *TopicExchange) declareExchange() error {
-	if ex.name == "" {
+	if ex.Name == "" {
 		return exchangeNameMissingErr
 	}
 
-	return mqChan.ExchangeDeclare(ex.name, "topic", true, false, false, false, nil)
+	return mqChan.ExchangeDeclare(ex.Name, "topic", true, false, false, false, nil)
 }
 
 func (ex *TopicExchange) Listen(handler MessageHandler) error {
@@ -146,21 +146,21 @@ func (ex *TopicExchange) Listen(handler MessageHandler) error {
 		return err
 	}
 
-	if ex.queueName != "" {
+	if ex.QueueName != "" {
 		return queueNameMissingErr
 	}
 
-	q, err := declareQueue(ex.queueName)
+	q, err := declareQueue(ex.QueueName)
 	if err != nil {
 		return err
 	}
 
-	if len(ex.topics) == 0 {
+	if len(ex.Topics) == 0 {
 		return topicMissingErr
 	}
 
-	for _, s := range ex.topics {
-		err = mqChan.QueueBind(q.Name, s, ex.name, false, nil)
+	for _, s := range ex.Topics {
+		err = mqChan.QueueBind(q.Name, s, ex.Name, false, nil)
 		if err != nil {
 			return err
 		}
@@ -178,15 +178,15 @@ func (ex *TopicExchange) Listen(handler MessageHandler) error {
 }
 
 type Queue struct {
-	name string
+	Name string
 }
 
 func (queue *Queue) Listen(handler MessageHandler) error {
-	if queue.name == "" {
+	if queue.Name == "" {
 		return queueNameMissingErr
 	}
 
-	q, err := declareQueue(queue.name)
+	q, err := declareQueue(queue.Name)
 
 	messages, err := consume(q)
 	if err != nil {
