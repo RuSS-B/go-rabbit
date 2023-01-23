@@ -16,6 +16,7 @@ var (
 )
 
 type Connection struct {
+	Closed chan bool
 	config config
 	mqConn *amqp.Connection
 	mqChan *amqp.Channel
@@ -29,11 +30,12 @@ func NewConnection(serverUrl string, connectionName string, maxAttempts uint) (*
 	}
 
 	conn := Connection{
+		Closed: make(chan bool),
 		config: cfg,
 	}
 	err := conn.Connect()
 	if err != nil {
-		return nil, err
+		return &conn, err
 	}
 
 	log.Println("Successfully connected to RabbitMQ")
@@ -69,6 +71,7 @@ func (conn *Connection) Connect() error {
 		}
 
 		if connAttempts >= int(conn.config.maxAttempts) {
+			go conn.terminate()
 			return err
 		}
 
@@ -79,12 +82,17 @@ func (conn *Connection) Connect() error {
 	conn.mqChan, err = conn.mqConn.Channel()
 	if err != nil {
 		conn.Close()
+		go conn.terminate()
 		return err
 	}
 
 	conn.observe()
 
 	return nil
+}
+
+func (conn *Connection) terminate() {
+	conn.Closed <- true
 }
 
 func (conn *Connection) observe() {
@@ -94,8 +102,7 @@ func (conn *Connection) observe() {
 		conn.Close()
 		err := conn.Connect()
 		if err != nil {
-			color.Red("Unable to reconnect")
-			return
+			color.Red("Unable to connect")
 		}
 	}()
 }
@@ -144,95 +151,4 @@ func consume(mqChan *amqp.Channel, q *amqp.Queue) (<-chan amqp.Delivery, error) 
 	}
 
 	return messages, err
-}
-
-type TopicExchange struct {
-	conn      *Connection
-	name      string
-	queueName string
-	topics    []string
-}
-
-func NewTopicExchange(exchangeName string, queueName string, topics []string, conn *Connection) TopicExchange {
-	return TopicExchange{
-		conn:      conn,
-		name:      exchangeName,
-		queueName: queueName,
-		topics:    topics,
-	}
-}
-
-func (ex *TopicExchange) declareExchange() error {
-	if ex.name == "" {
-		return exchangeNameMissingErr
-	}
-
-	return ex.conn.mqChan.ExchangeDeclare(ex.name, "topic", true, false, false, false, nil)
-}
-
-func (ex *TopicExchange) Listen(handler MessageHandler) error {
-	err := ex.declareExchange()
-	if err != nil {
-		return err
-	}
-
-	if ex.queueName == "" {
-		return queueNameMissingErr
-	}
-
-	q, err := declareQueue(ex.conn.mqChan, ex.queueName)
-	if err != nil {
-		return err
-	}
-
-	if len(ex.topics) == 0 {
-		return topicMissingErr
-	}
-
-	for _, s := range ex.topics {
-		err = ex.conn.mqChan.QueueBind(q.Name, s, ex.name, false, nil)
-		if err != nil {
-			return err
-		}
-	}
-
-	messages, err := consume(ex.conn.mqChan, &q)
-	if err != nil {
-		return err
-	}
-
-	color.Green("Waiting for messages in [Queue] [%s]\n", q.Name)
-	handle(messages, handler)
-
-	return nil
-}
-
-type Queue struct {
-	conn *Connection
-	name string
-}
-
-func NewQueue(queueName string, conn *Connection) Queue {
-	return Queue{
-		conn: conn,
-		name: queueName,
-	}
-}
-
-func (queue *Queue) Listen(handler MessageHandler) error {
-	if queue.name == "" {
-		return queueNameMissingErr
-	}
-
-	q, err := declareQueue(queue.conn.mqChan, queue.name)
-
-	messages, err := consume(queue.conn.mqChan, &q)
-	if err != nil {
-		return err
-	}
-
-	color.Green("Waiting for messages in [Queue] [%s]\n", q.Name)
-	handle(messages, handler)
-
-	return nil
 }
