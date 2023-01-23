@@ -3,15 +3,9 @@
 
 ## Example Usage
 ```
-mqConfig := rabbitmq.MQConfig{
-    ConnectionName: "my_awesome_connection_name",
-    MaxAttempts:    5,
-    ServerURL:      os.Getenv("AMQP_SERVER_URL"),
-}
-
-err = rabbitmq.ConnectToMQ(mqConfig)
-if err != nil {
-	rabbitmq.CloseActiveConnections()
-	log.Fatalln(err)
-}
+	conn, err := NewConnection("amqp://guest:guest@127.0.0.1", "text_conn", 2)
+	if err != nil {
+		fmt.Println("Unable to connect.", err)
+	}
+	defer conn.Close()
 ```

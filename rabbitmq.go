@@ -9,43 +9,66 @@ import (
 	"time"
 )
 
-var mqConn *amqp.Connection
-var mqChan *amqp.Channel
-
 var (
 	queueNameMissingErr    = errors.New("the queueName name should not be empty")
 	topicMissingErr        = errors.New("there should be at least one topic provided")
 	exchangeNameMissingErr = errors.New("the exchange name should not be empty")
 )
 
-type MQConfig struct {
-	ConnectionName string
-	MaxAttempts    uint
-	ServerURL      string
+type Connection struct {
+	config config
+	mqConn *amqp.Connection
+	mqChan *amqp.Channel
 }
 
-func ConnectToMQ(config MQConfig) error {
+func NewConnection(serverUrl string, connectionName string, maxAttempts uint) (*Connection, error) {
+	cfg := config{
+		serverURL:      serverUrl,
+		connectionName: connectionName,
+		maxAttempts:    maxAttempts,
+	}
+
+	conn := Connection{
+		config: cfg,
+	}
+	err := conn.Connect()
+	if err != nil {
+		return nil, err
+	}
+
+	log.Println("Successfully connected to RabbitMQ")
+
+	return &conn, nil
+}
+
+type config struct {
+	connectionName string
+	maxAttempts    uint
+	serverURL      string
+}
+
+func (conn *Connection) Connect() error {
 	var err error
 
 	cfg := amqp.Config{
 		Properties: amqp.Table{
-			"connection_name": config.ConnectionName,
+			"connection_name": conn.config.connectionName,
 		},
 	}
 
 	var connAttempts = 0
 	for {
 		connAttempts++
-		log.Printf("Attempt %d of %d: Connecting to RabbitMQ...\n", connAttempts, config.MaxAttempts)
+		log.Printf("Attempt %d of %d: Connecting to RabbitMQ...\n", connAttempts, conn.config.maxAttempts)
 
-		mqConn, err = amqp.DialConfig(config.ServerURL, cfg)
+		conn.mqConn, err = amqp.DialConfig(conn.config.serverURL, cfg)
 		if err != nil {
 			log.Println("RabbitMQ not ready yet...")
 		} else {
 			break
 		}
 
-		if connAttempts >= int(config.MaxAttempts) {
+		if connAttempts >= int(conn.config.maxAttempts) {
 			return err
 		}
 
@@ -53,26 +76,23 @@ func ConnectToMQ(config MQConfig) error {
 		time.Sleep(waitTime)
 	}
 
-	mqChan, err = mqConn.Channel()
+	conn.mqChan, err = conn.mqConn.Channel()
 	if err != nil {
+		conn.Close()
 		return err
 	}
 
-	log.Println("Successfully connected to RabbitMQ")
-	log.Println("Waiting for messages")
-
-	observeMQConnection(config)
+	conn.observe()
 
 	return nil
 }
 
-func observeMQConnection(config MQConfig) {
+func (conn *Connection) observe() {
 	go func() {
-		log.Printf("Connection closed: %s\n", <-mqConn.NotifyClose(make(chan *amqp.Error)))
-		log.Printf("Trying to reconnect to MQ\n")
+		log.Printf("Connection closed: %s\n", <-conn.mqConn.NotifyClose(make(chan *amqp.Error)))
 
-		CloseActiveConnections()
-		err := ConnectToMQ(config)
+		conn.Close()
+		err := conn.Connect()
 		if err != nil {
 			color.Red("Unable to reconnect")
 			return
@@ -80,18 +100,20 @@ func observeMQConnection(config MQConfig) {
 	}()
 }
 
-func CloseActiveConnections() {
-	if mqChan != nil && !mqChan.IsClosed() {
-		if err := mqChan.Close(); err != nil {
+func (conn *Connection) Close() {
+	if conn.mqChan != nil && !conn.mqChan.IsClosed() {
+		if err := conn.mqChan.Close(); err != nil {
 			log.Println("Unable to close channel", err)
 		}
 	}
 
-	if mqConn != nil && !mqConn.IsClosed() {
-		if err := mqConn.Close(); err != nil {
+	if conn.mqConn != nil && !conn.mqConn.IsClosed() {
+		if err := conn.mqConn.Close(); err != nil {
 			log.Println("Unable to close connection", err)
 		}
 	}
+
+	log.Println("Connection closed")
 }
 
 type MessageHandler func(message amqp.Delivery)
@@ -102,11 +124,11 @@ func handle(messages <-chan amqp.Delivery, handler MessageHandler) {
 	}
 }
 
-func declareQueue(queueName string) (amqp.Queue, error) {
+func declareQueue(mqChan *amqp.Channel, queueName string) (amqp.Queue, error) {
 	return mqChan.QueueDeclare(queueName, true, false, false, false, nil)
 }
 
-func consume(q amqp.Queue) (<-chan amqp.Delivery, error) {
+func consume(mqChan *amqp.Channel, q *amqp.Queue) (<-chan amqp.Delivery, error) {
 	messages, err := mqChan.Consume(
 		q.Name,
 		"",
@@ -125,13 +147,15 @@ func consume(q amqp.Queue) (<-chan amqp.Delivery, error) {
 }
 
 type TopicExchange struct {
+	conn      *Connection
 	name      string
 	queueName string
 	topics    []string
 }
 
-func NewTopicExchange(exchangeName string, queueName string, topics []string) TopicExchange {
+func NewTopicExchange(exchangeName string, queueName string, topics []string, conn *Connection) TopicExchange {
 	return TopicExchange{
+		conn:      conn,
 		name:      exchangeName,
 		queueName: queueName,
 		topics:    topics,
@@ -143,7 +167,7 @@ func (ex *TopicExchange) declareExchange() error {
 		return exchangeNameMissingErr
 	}
 
-	return mqChan.ExchangeDeclare(ex.name, "topic", true, false, false, false, nil)
+	return ex.conn.mqChan.ExchangeDeclare(ex.name, "topic", true, false, false, false, nil)
 }
 
 func (ex *TopicExchange) Listen(handler MessageHandler) error {
@@ -156,7 +180,7 @@ func (ex *TopicExchange) Listen(handler MessageHandler) error {
 		return queueNameMissingErr
 	}
 
-	q, err := declareQueue(ex.queueName)
+	q, err := declareQueue(ex.conn.mqChan, ex.queueName)
 	if err != nil {
 		return err
 	}
@@ -166,13 +190,13 @@ func (ex *TopicExchange) Listen(handler MessageHandler) error {
 	}
 
 	for _, s := range ex.topics {
-		err = mqChan.QueueBind(q.Name, s, ex.name, false, nil)
+		err = ex.conn.mqChan.QueueBind(q.Name, s, ex.name, false, nil)
 		if err != nil {
 			return err
 		}
 	}
 
-	messages, err := consume(q)
+	messages, err := consume(ex.conn.mqChan, &q)
 	if err != nil {
 		return err
 	}
@@ -184,11 +208,13 @@ func (ex *TopicExchange) Listen(handler MessageHandler) error {
 }
 
 type Queue struct {
+	conn *Connection
 	name string
 }
 
-func NewQueue(queueName string) Queue {
+func NewQueue(queueName string, conn *Connection) Queue {
 	return Queue{
+		conn: conn,
 		name: queueName,
 	}
 }
@@ -198,9 +224,9 @@ func (queue *Queue) Listen(handler MessageHandler) error {
 		return queueNameMissingErr
 	}
 
-	q, err := declareQueue(queue.name)
+	q, err := declareQueue(queue.conn.mqChan, queue.name)
 
-	messages, err := consume(q)
+	messages, err := consume(queue.conn.mqChan, &q)
 	if err != nil {
 		return err
 	}
