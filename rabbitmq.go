@@ -152,7 +152,7 @@ func (ex *TopicExchange) Listen(handler MessageHandler) error {
 		return err
 	}
 
-	if ex.queueName != "" {
+	if ex.queueName == "" {
 		return queueNameMissingErr
 	}
 
