@@ -9,20 +9,28 @@ type TopicExchange struct {
 	topics    []string
 }
 
-func NewTopicExchange(exchangeName string, queueName string, topics []string, conn *Connection) TopicExchange {
+func NewTopicExchange(exchangeName string, queueName string, topics []string, conn *Connection) (TopicExchange, error) {
+	if exchangeName == "" {
+		return TopicExchange{}, exchangeNameMissingErr
+	}
+
+	if queueName == "" {
+		return TopicExchange{}, queueNameMissingErr
+	}
+
+	if len(topics) == 0 {
+		return TopicExchange{}, topicMissingErr
+	}
+
 	return TopicExchange{
 		conn:      conn,
 		name:      exchangeName,
 		queueName: queueName,
 		topics:    topics,
-	}
+	}, nil
 }
 
 func (ex *TopicExchange) declareExchange() error {
-	if ex.name == "" {
-		return exchangeNameMissingErr
-	}
-
 	return ex.conn.mqChan.ExchangeDeclare(ex.name, "topic", true, false, false, false, nil)
 }
 
@@ -32,17 +40,9 @@ func (ex *TopicExchange) Listen(handler MessageHandler) error {
 		return err
 	}
 
-	if ex.queueName == "" {
-		return queueNameMissingErr
-	}
-
 	q, err := declareQueue(ex.conn.mqChan, ex.queueName)
 	if err != nil {
 		return err
-	}
-
-	if len(ex.topics) == 0 {
-		return topicMissingErr
 	}
 
 	for _, s := range ex.topics {

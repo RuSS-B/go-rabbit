@@ -1,6 +1,7 @@
 package go_rabbit
 
 import (
+	"context"
 	"errors"
 	"github.com/fatih/color"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -151,4 +152,26 @@ func consume(mqChan *amqp.Channel, q *amqp.Queue) (<-chan amqp.Delivery, error) 
 	}
 
 	return messages, err
+}
+
+func publish(mqChan *amqp.Channel, q *amqp.Queue, body []byte) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := mqChan.PublishWithContext(
+		ctx,
+		"",
+		q.Name,
+		false,
+		false,
+		amqp.Publishing{
+			ContentType: "application/json",
+			Body:        body,
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
