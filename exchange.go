@@ -1,12 +1,16 @@
 package go_rabbit
 
-import "github.com/fatih/color"
+import (
+	"github.com/fatih/color"
+	amqp "github.com/rabbitmq/amqp091-go"
+)
 
 type TopicExchange struct {
 	conn      *Connection
 	name      string
 	queueName string
 	topics    []string
+	mqChan    *amqp.Channel
 }
 
 func NewTopicExchange(exchangeName string, queueName string, topics []string, conn *Connection) (TopicExchange, error) {
@@ -22,16 +26,22 @@ func NewTopicExchange(exchangeName string, queueName string, topics []string, co
 		return TopicExchange{}, topicMissingErr
 	}
 
+	ch, err := conn.newChannel()
+	if err != nil {
+		return TopicExchange{}, err
+	}
+
 	return TopicExchange{
 		conn:      conn,
 		name:      exchangeName,
 		queueName: queueName,
 		topics:    topics,
+		mqChan:    ch,
 	}, nil
 }
 
 func (ex *TopicExchange) declareExchange() error {
-	return ex.conn.mqChan.ExchangeDeclare(ex.name, "topic", true, false, false, false, nil)
+	return ex.mqChan.ExchangeDeclare(ex.name, "topic", true, false, false, false, nil)
 }
 
 func (ex *TopicExchange) Listen(handler MessageHandler) error {
@@ -40,19 +50,19 @@ func (ex *TopicExchange) Listen(handler MessageHandler) error {
 		return err
 	}
 
-	q, err := declareQueue(ex.conn.mqChan, ex.queueName)
+	q, err := declareQueue(ex.mqChan, ex.queueName)
 	if err != nil {
 		return err
 	}
 
 	for _, s := range ex.topics {
-		err = ex.conn.mqChan.QueueBind(q.Name, s, ex.name, false, nil)
+		err = ex.mqChan.QueueBind(q.Name, s, ex.name, false, nil)
 		if err != nil {
 			return err
 		}
 	}
 
-	messages, err := consume(ex.conn.mqChan, &q)
+	messages, err := consume(ex.mqChan, &q)
 	if err != nil {
 		return err
 	}
@@ -61,4 +71,8 @@ func (ex *TopicExchange) Listen(handler MessageHandler) error {
 	handle(messages, handler)
 
 	return nil
+}
+
+func (ex *TopicExchange) Close() {
+	closeChannel(ex.mqChan)
 }

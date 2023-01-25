@@ -20,7 +20,6 @@ type Connection struct {
 	Closed chan bool
 	config config
 	mqConn *amqp.Connection
-	mqChan *amqp.Channel
 }
 
 func NewConnection(serverUrl string, connectionName string, maxAttempts uint) (*Connection, error) {
@@ -80,16 +79,13 @@ func (conn *Connection) Connect() error {
 		time.Sleep(waitTime)
 	}
 
-	conn.mqChan, err = conn.mqConn.Channel()
-	if err != nil {
-		conn.Close()
-		go conn.terminate()
-		return err
-	}
-
 	conn.observe()
 
 	return nil
+}
+
+func (conn *Connection) newChannel() (*amqp.Channel, error) {
+	return conn.mqConn.Channel()
 }
 
 func (conn *Connection) terminate() {
@@ -108,13 +104,15 @@ func (conn *Connection) observe() {
 	}()
 }
 
-func (conn *Connection) Close() {
-	if conn.mqChan != nil && !conn.mqChan.IsClosed() {
-		if err := conn.mqChan.Close(); err != nil {
+func closeChannel(mqChan *amqp.Channel) {
+	if mqChan != nil && !mqChan.IsClosed() {
+		if err := mqChan.Close(); err != nil {
 			log.Println("Unable to close channel", err)
 		}
 	}
+}
 
+func (conn *Connection) Close() {
 	if conn.mqConn != nil && !conn.mqConn.IsClosed() {
 		if err := conn.mqConn.Close(); err != nil {
 			log.Println("Unable to close connection", err)

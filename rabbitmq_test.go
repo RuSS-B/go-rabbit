@@ -32,6 +32,7 @@ func TestMessageHandling(t *testing.T) {
 	if err != nil {
 		log.Println("Unable to read message", err)
 	}
+	defer tex.Close()
 }
 
 func TestWaitForSignal(t *testing.T) {
@@ -51,8 +52,9 @@ func TestNewQueue(t *testing.T) {
 	}
 	defer conn.Close()
 
-	_, err = NewQueue("TestQueueName", conn)
+	q, err := NewQueue("TestQueueName", conn)
 	if err != nil {
 		log.Fatalln(err)
 	}
+	defer q.Close()
 }
