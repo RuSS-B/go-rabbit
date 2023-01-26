@@ -47,7 +47,7 @@ func TestWaitForSignal(t *testing.T) {
 	}
 	defer conn.Close()
 
-	conn.OnRecover(func(conn *Connection) {
+	conn.WhenConnected(func(conn *Connection) {
 		q, _ := NewQueue("test_input", conn)
 
 		//Sending values to queue every 2 seconds

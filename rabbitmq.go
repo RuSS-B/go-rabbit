@@ -91,7 +91,7 @@ func (conn *Connection) Connect() error {
 	return nil
 }
 
-func (conn *Connection) OnRecover(handler onSuccessConn) {
+func (conn *Connection) WhenConnected(handler onSuccessConn) {
 	conn.onRecover = &handler
 }
 
