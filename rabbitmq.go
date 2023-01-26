@@ -115,12 +115,18 @@ func (conn *Connection) observe() {
 		if conn.onRecover != nil {
 			conn.recover()
 		}
-		log.Printf("Connection closed: %s\n", <-conn.mqConn.NotifyClose(make(chan *amqp.Error)))
 
-		conn.Close()
-		err := conn.Connect()
-		if err != nil {
-			color.Red("Unable to connect")
+		closeErr := <-conn.mqConn.NotifyClose(make(chan *amqp.Error))
+		log.Printf("Connection closed: %s\n", closeErr)
+
+		if closeErr != nil {
+			conn.Close()
+			err := conn.Connect()
+			if err != nil {
+				color.Red("Unable to connect")
+			}
+		} else {
+			conn.Closed <- true
 		}
 	}()
 }
@@ -139,8 +145,6 @@ func (conn *Connection) Close() {
 			log.Println("Unable to close connection", err)
 		}
 	}
-
-	log.Println("Connection closed")
 }
 
 type MessageHandler func(message amqp.Delivery)

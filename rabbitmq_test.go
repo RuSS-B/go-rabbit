@@ -80,7 +80,7 @@ func TestWaitForSignal(t *testing.T) {
 	<-conn.Closed
 }
 
-func TestNewQueue(t *testing.T) {
+func TestGracefulClose(t *testing.T) {
 	conn, err := NewConnection("amqp://guest:guest@127.0.0.1", Config{
 		ConnectionName: "test_conn",
 		MaxAttempts:    2,
@@ -90,11 +90,15 @@ func TestNewQueue(t *testing.T) {
 	}
 	defer conn.Close()
 
-	conn.OnRecover(func(conn *Connection) {
+	go func() {
 		q, err := NewQueue("TestQueueName", conn)
 		if err != nil {
 			log.Fatalln(err)
 		}
 		defer q.Close()
-	})
+
+		conn.Close()
+	}()
+
+	<-conn.Closed
 }
