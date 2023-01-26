@@ -18,7 +18,6 @@ var (
 )
 
 type Config struct {
-	serverURL      string
 	ConnectionName string
 	MaxAttempts    uint
 }
@@ -30,11 +29,11 @@ type Connection struct {
 	config    Config
 	mqConn    *amqp.Connection
 	onRecover *onSuccessConn
+	dsn       string
 }
 
 func NewConnection(serverURL string, cfg Config) (*Connection, error) {
-	cfg.serverURL = serverURL
-	if cfg.serverURL == "" {
+	if serverURL == "" {
 		return nil, serverUrlMissingErr
 	}
 
@@ -45,6 +44,7 @@ func NewConnection(serverURL string, cfg Config) (*Connection, error) {
 	conn := &Connection{
 		Closed: make(chan bool),
 		config: cfg,
+		dsn:    serverURL,
 	}
 	err := conn.Connect()
 	if err != nil {
@@ -70,7 +70,7 @@ func (conn *Connection) Connect() error {
 		connAttempts++
 		log.Printf("Attempt %d of %d: Connecting to RabbitMQ...\n", connAttempts, conn.config.MaxAttempts)
 
-		conn.mqConn, err = amqp.DialConfig(conn.config.serverURL, cfg)
+		conn.mqConn, err = amqp.DialConfig(conn.dsn, cfg)
 		if err != nil {
 			log.Println("RabbitMQ not ready yet...")
 		} else {
