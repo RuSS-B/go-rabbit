@@ -15,7 +15,7 @@ if err != nil {
 defer conn.Close()
 
 //The methods inside callback will be executed after successful connection to MQ. 
-mqConn.WhenConnected(func(conn *rabbitmq.Connection) {
+conn.WhenConnected(func(conn *rabbitmq.Connection) {
     go handleS3()
     go handleMetrics()
 })

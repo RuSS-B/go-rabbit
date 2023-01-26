@@ -32,11 +32,7 @@ type Connection struct {
 	dsn       string
 }
 
-func NewConnection(serverURL string, cfg Config) (*Connection, error) {
-	if serverURL == "" {
-		return nil, serverUrlMissingErr
-	}
-
+func NewConnection(serverURL string, cfg Config) *Connection {
 	if cfg.MaxAttempts == 0 {
 		cfg.MaxAttempts = 10
 	}
@@ -46,26 +42,28 @@ func NewConnection(serverURL string, cfg Config) (*Connection, error) {
 		config: cfg,
 		dsn:    serverURL,
 	}
+
+	return conn
+}
+
+func CreateNewAndConnect(serverURL string, cfg Config) (*Connection, error) {
+	conn := NewConnection(serverURL, cfg)
 	err := conn.Connect()
-	if err != nil {
-		return conn, err
-	}
 
-	log.Println("Successfully connected to RabbitMQ")
-
-	return conn, nil
+	return conn, err
 }
 
 func (conn *Connection) Connect() error {
-	var err error
-
 	cfg := amqp.Config{
 		Properties: amqp.Table{
 			"connection_name": conn.config.ConnectionName,
 		},
 	}
 
-	var connAttempts = 0
+	var (
+		connAttempts uint = 0
+		err          error
+	)
 	for {
 		connAttempts++
 		log.Printf("Attempt %d of %d: Connecting to RabbitMQ...\n", connAttempts, conn.config.MaxAttempts)
@@ -77,7 +75,7 @@ func (conn *Connection) Connect() error {
 			break
 		}
 
-		if connAttempts >= int(conn.config.MaxAttempts) {
+		if connAttempts >= conn.config.MaxAttempts {
 			go conn.terminate()
 			return err
 		}
@@ -86,17 +84,22 @@ func (conn *Connection) Connect() error {
 		time.Sleep(waitTime)
 	}
 
+	log.Println("Successfully connected to RabbitMQ")
+
 	conn.observe()
 
 	return nil
 }
 
-func (conn *Connection) WhenConnected(handler onSuccessConn) {
+func (conn *Connection) WhenConnected(handler onSuccessConn) *Connection {
 	conn.onRecover = &handler
+
+	return conn
 }
 
 func (conn *Connection) recover() {
 	if conn.onRecover != nil {
+		log.Println("RabbitMQ: Starting the handlers")
 		h := *conn.onRecover
 		h(conn)
 	}

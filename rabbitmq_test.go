@@ -11,7 +11,7 @@ import (
 )
 
 func TestConnect(t *testing.T) {
-	conn, err := NewConnection("amqp://guest:guest@127.0.0.1", Config{})
+	conn, err := CreateNewAndConnect("amqp://guest:guest@127.0.0.1", Config{})
 	if err != nil {
 		fmt.Println("Unable to connect.", err)
 	}
@@ -19,9 +19,9 @@ func TestConnect(t *testing.T) {
 }
 
 func TestMessageHandling(t *testing.T) {
-	conn, err := NewConnection("amqp://guest:guest@127.0.0.1", Config{})
+	conn, err := CreateNewAndConnect("amqp://guest:guest@127.0.0.1", Config{})
 	if err != nil {
-		fmt.Println("Unable to connect.", err)
+		log.Fatalln("Unable to connect.", err)
 	}
 	defer conn.Close()
 
@@ -39,15 +39,9 @@ func TestMessageHandling(t *testing.T) {
 }
 
 func TestWaitForSignal(t *testing.T) {
-	conn, err := NewConnection("amqp://guest:guest@127.0.0.1", Config{
+	conn := NewConnection("amqp://guest:guest@127.0.0.1", Config{
 		ConnectionName: "test_conn",
-	})
-	if err != nil {
-		fmt.Println("Unable to connect.", err)
-	}
-	defer conn.Close()
-
-	conn.WhenConnected(func(conn *Connection) {
+	}).WhenConnected(func(conn *Connection) {
 		q, _ := NewQueue("test_input", conn)
 
 		//Sending values to queue every 2 seconds
@@ -55,7 +49,7 @@ func TestWaitForSignal(t *testing.T) {
 			i := 0
 			for !q.IsClosed() {
 				i++
-				err = q.Publish([]byte(fmt.Sprintf("Tick %d", i)))
+				err := q.Publish([]byte(fmt.Sprintf("Tick %d", i)))
 				if err != nil {
 					log.Println("Publishing error", err)
 				}
@@ -65,7 +59,7 @@ func TestWaitForSignal(t *testing.T) {
 
 		//Reading data from queue
 		go func() {
-			err = q.Listen(func(message amqp.Delivery) {
+			err := q.Listen(func(message amqp.Delivery) {
 				log.Println(string(message.Body))
 			})
 			if err != nil {
@@ -77,17 +71,24 @@ func TestWaitForSignal(t *testing.T) {
 		color.Green("Number of GORUTINES: %d", runtime.NumGoroutine())
 	})
 
+	err := conn.Connect()
+	if err != nil {
+		fmt.Println("Unable to connect.", err)
+	}
+	defer conn.Close()
+
 	<-conn.Closed
 }
 
 func TestGracefulClose(t *testing.T) {
-	conn, err := NewConnection("amqp://guest:guest@127.0.0.1", Config{
+	conn, err := CreateNewAndConnect("amqp://guest:guest@127.0.0.1", Config{
 		ConnectionName: "test_conn",
 		MaxAttempts:    2,
 	})
 	if err != nil {
-		fmt.Println("Unable to connect.", err)
+		log.Fatalln("Unable to connect.", err)
 	}
+
 	defer conn.Close()
 
 	go func() {
