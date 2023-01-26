@@ -2,13 +2,16 @@ package go_rabbit
 
 import (
 	"fmt"
+	"github.com/fatih/color"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
+	"runtime"
 	"testing"
+	"time"
 )
 
 func TestConnect(t *testing.T) {
-	conn, err := NewConnection("amqp://guest:guest@127.0.0.1", "text_conn", 2)
+	conn, err := NewConnection("amqp://guest:guest@127.0.0.1", Config{})
 	if err != nil {
 		fmt.Println("Unable to connect.", err)
 	}
@@ -16,7 +19,7 @@ func TestConnect(t *testing.T) {
 }
 
 func TestMessageHandling(t *testing.T) {
-	conn, err := NewConnection("amqp://guest:guest@127.0.0.1", "text_conn", 2)
+	conn, err := NewConnection("amqp://guest:guest@127.0.0.1", Config{})
 	if err != nil {
 		fmt.Println("Unable to connect.", err)
 	}
@@ -36,25 +39,62 @@ func TestMessageHandling(t *testing.T) {
 }
 
 func TestWaitForSignal(t *testing.T) {
-	conn, err := NewConnection("amqp://guest:guest@127.0.0.1", "text_conn", 2)
+	conn, err := NewConnection("amqp://guest:guest@127.0.0.1", Config{
+		ConnectionName: "test_conn",
+	})
 	if err != nil {
 		fmt.Println("Unable to connect.", err)
 	}
 	defer conn.Close()
+
+	conn.OnRecover(func(conn *Connection) {
+		q, _ := NewQueue("test_input", conn)
+
+		//Sending values to queue every 2 seconds
+		go func() {
+			i := 0
+			for !q.IsClosed() {
+				i++
+				err = q.Publish([]byte(fmt.Sprintf("Tick %d", i)))
+				if err != nil {
+					log.Println("Publishing error", err)
+				}
+				time.Sleep(2 * time.Second)
+			}
+		}()
+
+		//Reading data from queue
+		go func() {
+			err = q.Listen(func(message amqp.Delivery) {
+				log.Println(string(message.Body))
+			})
+			if err != nil {
+				log.Println("Listener error", err)
+			}
+		}()
+
+		//Just to make sure that the number stays the same after reconnect
+		color.Green("Number of GORUTINES: %d", runtime.NumGoroutine())
+	})
 
 	<-conn.Closed
 }
 
 func TestNewQueue(t *testing.T) {
-	conn, err := NewConnection("amqp://guest:guest@127.0.0.1", "text_conn", 2)
+	conn, err := NewConnection("amqp://guest:guest@127.0.0.1", Config{
+		ConnectionName: "test_conn",
+		MaxAttempts:    2,
+	})
 	if err != nil {
 		fmt.Println("Unable to connect.", err)
 	}
 	defer conn.Close()
 
-	q, err := NewQueue("TestQueueName", conn)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer q.Close()
+	conn.OnRecover(func(conn *Connection) {
+		q, err := NewQueue("TestQueueName", conn)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		defer q.Close()
+	})
 }

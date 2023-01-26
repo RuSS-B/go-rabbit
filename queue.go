@@ -59,6 +59,10 @@ func (queue *Queue) Publish(body []byte) error {
 	return nil
 }
 
+func (queue *Queue) IsClosed() bool {
+	return queue.mqChan.IsClosed()
+}
+
 func (queue *Queue) Close() {
 	closeChannel(queue.mqChan)
 }

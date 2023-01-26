@@ -11,42 +11,49 @@ import (
 )
 
 var (
+	serverUrlMissingErr    = errors.New("the ServerURL cannot be empty")
 	queueNameMissingErr    = errors.New("the queueName name should not be empty")
 	topicMissingErr        = errors.New("there should be at least one topic provided")
 	exchangeNameMissingErr = errors.New("the exchange name should not be empty")
 )
 
-type Connection struct {
-	Closed chan bool
-	config config
-	mqConn *amqp.Connection
+type Config struct {
+	serverURL      string
+	ConnectionName string
+	MaxAttempts    uint
 }
 
-func NewConnection(serverUrl string, connectionName string, maxAttempts uint) (*Connection, error) {
-	cfg := config{
-		serverURL:      serverUrl,
-		connectionName: connectionName,
-		maxAttempts:    maxAttempts,
+type onSuccessConn func(conn *Connection)
+
+type Connection struct {
+	Closed    chan bool
+	config    Config
+	mqConn    *amqp.Connection
+	onRecover *onSuccessConn
+}
+
+func NewConnection(serverURL string, cfg Config) (*Connection, error) {
+	cfg.serverURL = serverURL
+	if cfg.serverURL == "" {
+		return nil, serverUrlMissingErr
 	}
 
-	conn := Connection{
+	if cfg.MaxAttempts == 0 {
+		cfg.MaxAttempts = 10
+	}
+
+	conn := &Connection{
 		Closed: make(chan bool),
 		config: cfg,
 	}
 	err := conn.Connect()
 	if err != nil {
-		return &conn, err
+		return conn, err
 	}
 
 	log.Println("Successfully connected to RabbitMQ")
 
-	return &conn, nil
-}
-
-type config struct {
-	connectionName string
-	maxAttempts    uint
-	serverURL      string
+	return conn, nil
 }
 
 func (conn *Connection) Connect() error {
@@ -54,14 +61,14 @@ func (conn *Connection) Connect() error {
 
 	cfg := amqp.Config{
 		Properties: amqp.Table{
-			"connection_name": conn.config.connectionName,
+			"connection_name": conn.config.ConnectionName,
 		},
 	}
 
 	var connAttempts = 0
 	for {
 		connAttempts++
-		log.Printf("Attempt %d of %d: Connecting to RabbitMQ...\n", connAttempts, conn.config.maxAttempts)
+		log.Printf("Attempt %d of %d: Connecting to RabbitMQ...\n", connAttempts, conn.config.MaxAttempts)
 
 		conn.mqConn, err = amqp.DialConfig(conn.config.serverURL, cfg)
 		if err != nil {
@@ -70,7 +77,7 @@ func (conn *Connection) Connect() error {
 			break
 		}
 
-		if connAttempts >= int(conn.config.maxAttempts) {
+		if connAttempts >= int(conn.config.MaxAttempts) {
 			go conn.terminate()
 			return err
 		}
@@ -84,6 +91,17 @@ func (conn *Connection) Connect() error {
 	return nil
 }
 
+func (conn *Connection) OnRecover(handler onSuccessConn) {
+	conn.onRecover = &handler
+}
+
+func (conn *Connection) recover() {
+	if conn.onRecover != nil {
+		h := *conn.onRecover
+		h(conn)
+	}
+}
+
 func (conn *Connection) newChannel() (*amqp.Channel, error) {
 	return conn.mqConn.Channel()
 }
@@ -94,6 +112,9 @@ func (conn *Connection) terminate() {
 
 func (conn *Connection) observe() {
 	go func() {
+		if conn.onRecover != nil {
+			conn.recover()
+		}
 		log.Printf("Connection closed: %s\n", <-conn.mqConn.NotifyClose(make(chan *amqp.Error)))
 
 		conn.Close()

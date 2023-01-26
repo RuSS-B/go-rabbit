@@ -73,6 +73,10 @@ func (ex *TopicExchange) Listen(handler MessageHandler) error {
 	return nil
 }
 
+func (ex *TopicExchange) IsClosed() bool {
+	return ex.mqChan.IsClosed()
+}
+
 func (ex *TopicExchange) Close() {
 	closeChannel(ex.mqChan)
 }
